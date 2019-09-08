@@ -390,23 +390,22 @@ __global__ void kernIdentifyCellStartEnd(int N, int *particleGridIndices,
   // "this index doesn't match the one before it, must be a new cell!"
   int index = threadIdx.x + (blockIdx.x * blockDim.x);
   if (index >= N) {
-	return;
+	  return;
   }
-  bool startIndexFound = false;
-  for (int i = 0; i < N; i++) {
-	if (!startIndexFound && particleGridIndices[i] == index) {
-      startIndexFound = true;
-	  gridCellStartIndices[index] = i;
-	}
-	if (startIndexFound) {
-	  if (particleGridIndices[i] != index) {
-	    gridCellEndIndices[index] = i - 1;
-	    break;
-	  }
-	  if (i == N - 1) {
-		  gridCellEndIndices[index] = i;
-	  }
-	}
+  int gridIndex = particleGridIndices[index];
+  if (index == 0) {
+    gridCellStartIndices[gridIndex] = index;
+    return;
+  }
+  if (index == N - 1) {
+    gridCellEndIndices[gridIndex] = index;
+    return;
+  }
+  if (gridIndex != particleGridIndices[index - 1]) {
+    gridCellStartIndices[gridIndex] = index;
+  }
+  if (gridIndex != particleGridIndices[index + 1]) {
+    gridCellEndIndices[gridIndex] = index;
   }
 }
 
@@ -659,36 +658,30 @@ void Boids::stepSimulationScatteredGrid(float dt) {
   dim3 fullBlocksPerGrid((numObjects + blockSize - 1) / blockSize);
   kernComputeIndices<<<fullBlocksPerGrid, blockSize>>>
 	  (numObjects, gridSideCount, gridMinimum, gridInverseCellWidth, dev_pos, dev_particleArrayIndices, dev_particleGridIndices);
-  cudaDeviceSynchronize();
-  
+
   // - Unstable key sort using Thrust. A stable sort isn't necessary, but you
   //   are welcome to do a performance comparison.
   thrust::device_ptr<int> dev_thrust_particleArrayIndices(dev_particleArrayIndices);
   thrust::device_ptr<int> dev_thrust_particleGridIndices(dev_particleGridIndices);
   thrust::sort_by_key(dev_thrust_particleGridIndices, dev_thrust_particleGridIndices + numObjects, dev_thrust_particleArrayIndices);
-  cudaDeviceSynchronize();
   
   // - Naively unroll the loop for finding the start and end indices of each
   //   cell's data pointers in the array of boid indices
   dim3 fullBlocksPerGrid2((gridCellCount + blockSize - 1) / blockSize);
   kernResetIntBuffer<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_gridCellStartIndices, -1);
-  cudaDeviceSynchronize();
-  kernIdentifyCellStartEnd<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_particleGridIndices, dev_gridCellStartIndices, dev_gridCellEndIndices);
-  cudaDeviceSynchronize();
+  kernResetIntBuffer<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_gridCellEndIndices, -1);
+  kernIdentifyCellStartEnd<<<fullBlocksPerGrid, blockSize>>>(numObjects, dev_particleGridIndices, dev_gridCellStartIndices, dev_gridCellEndIndices);
 
   // - Perform velocity updates using neighbor search
   kernUpdateVelNeighborSearchScattered<<<fullBlocksPerGrid, blockSize>>>
 	  (numObjects, gridSideCount, gridMinimum, gridInverseCellWidth, gridCellWidth, dev_gridCellStartIndices,
 		  dev_gridCellEndIndices, dev_particleArrayIndices, dev_pos, dev_vel1, dev_vel2);
-  cudaDeviceSynchronize();
 
   // - Update positions
   kernUpdatePos<<<fullBlocksPerGrid, blockSize>>>(numObjects, dt, dev_pos, dev_vel2);
-  cudaDeviceSynchronize();
 
   // - Ping-pong buffers as needed
   cudaMemcpy(dev_vel1, dev_vel2, numObjects * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
-  cudaDeviceSynchronize();
 }
 
 void Boids::stepSimulationCoherentGrid(float dt) {
@@ -700,29 +693,25 @@ void Boids::stepSimulationCoherentGrid(float dt) {
   dim3 fullBlocksPerGrid((numObjects + blockSize - 1) / blockSize);
   kernComputeIndices<<<fullBlocksPerGrid, blockSize>>>
 	  (numObjects, gridSideCount, gridMinimum, gridInverseCellWidth, dev_pos, dev_particleArrayIndices, dev_particleGridIndices);
-  cudaDeviceSynchronize();
   
   // - Unstable key sort using Thrust. A stable sort isn't necessary, but you
   //   are welcome to do a performance comparison.
   thrust::device_ptr<int> dev_thrust_particleArrayIndices(dev_particleArrayIndices);
   thrust::device_ptr<int> dev_thrust_particleGridIndices(dev_particleGridIndices);
   thrust::sort_by_key(dev_thrust_particleGridIndices, dev_thrust_particleGridIndices + numObjects, dev_thrust_particleArrayIndices);
-  cudaDeviceSynchronize();
   
   // - Naively unroll the loop for finding the start and end indices of each
   //   cell's data pointers in the array of boid indices
   dim3 fullBlocksPerGrid2((gridCellCount + blockSize - 1) / blockSize);
   kernResetIntBuffer<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_gridCellStartIndices, -1);
-  cudaDeviceSynchronize();
-  kernIdentifyCellStartEnd<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_particleGridIndices, dev_gridCellStartIndices, dev_gridCellEndIndices);
-  cudaDeviceSynchronize();
+  kernResetIntBuffer<<<fullBlocksPerGrid2, blockSize>>>(gridCellCount, dev_gridCellEndIndices, -1);
+  kernIdentifyCellStartEnd<<<fullBlocksPerGrid, blockSize>>>(numObjects, dev_particleGridIndices, dev_gridCellStartIndices, dev_gridCellEndIndices);
 
   // - BIG DIFFERENCE: use the rearranged array index buffer to reshuffle all
   //   the particle data in the simulation array.
   //   CONSIDER WHAT ADDITIONAL BUFFERS YOU NEED
   kernReshuffleParticleData<<<fullBlocksPerGrid, blockSize>>>(numObjects, dev_particleArrayIndices, 
     dev_pos, dev_shuffled_pos, dev_vel1, dev_shuffled_vel);
-  cudaDeviceSynchronize();
   cudaMemcpy(dev_pos, dev_shuffled_pos, numObjects * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
   cudaMemcpy(dev_vel1, dev_shuffled_vel, numObjects * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
 
@@ -730,15 +719,12 @@ void Boids::stepSimulationCoherentGrid(float dt) {
   kernUpdateVelNeighborSearchCoherent<<<fullBlocksPerGrid, blockSize>>>
 	  (numObjects, gridSideCount, gridMinimum, gridInverseCellWidth, gridCellWidth, dev_gridCellStartIndices,
 		  dev_gridCellEndIndices, dev_pos, dev_vel1, dev_vel2);
-  cudaDeviceSynchronize();
 
   // - Update positions
   kernUpdatePos<<<fullBlocksPerGrid, blockSize>>>(numObjects, dt, dev_pos, dev_vel2);
-  cudaDeviceSynchronize();
 
   // - Ping-pong buffers as needed
   cudaMemcpy(dev_vel1, dev_vel2, numObjects * sizeof(glm::vec3), cudaMemcpyDeviceToDevice);
-  cudaDeviceSynchronize();
 }
 
 void Boids::endSimulation() {
