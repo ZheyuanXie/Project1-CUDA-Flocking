@@ -55,7 +55,7 @@ void checkCUDAError(const char *msg, int line = -1) {
 #define scene_scale 100.0f
 
 // Use half cell width?
-#define USE_HALF_CELL_WIDTH
+//#define USE_HALF_CELL_WIDTH
 
 /***********************************************
 * Kernel state (pointers are device pointers) *

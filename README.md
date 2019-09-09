@@ -1,3 +1,4 @@
+![](images/top_image.gif)
 # Project 1 - Flocking
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 1 - Flocking**
 
@@ -14,10 +15,12 @@
 
 ## Performance Analysis
 ### 1. Number of Boids
-The figure below shows the performance vs boid population curve with visualization turned off. We can observe:
+The figure below shows the relationship between performance and boid population. We can observe:
  - For all three methods, performance decrease as the number of boids increase. 
  - The naive method has the best performance when the number of boids are small (below 1.5k), but it decays rapidly as the number of boids increase. 
  - The coherent uniform grid has the best performance when the number of boids are large.
+  - Visualization generally decrease the framerate.
+  - When the number of boids is small, visualization is the performance bottleneck; When the number of boids is large, computation takes over.
 
  ![](images/population_fps.jpg)
 
@@ -54,4 +57,3 @@ Though the number of cells needs to be check is larger, the actual volume that i
  - Checking 27 Cells with 1-unit width is equivalent to checking a volume of 3\*3\*3=27 units.
 
  Therefore checking 27 cells with half the cell width means checking less boids and faster computation.
- 
