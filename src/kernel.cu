@@ -54,6 +54,9 @@ void checkCUDAError(const char *msg, int line = -1) {
 /*! Size of the starting area in simulation space. */
 #define scene_scale 100.0f
 
+// Use half cell width?
+#define USE_HALF_CELL_WIDTH
+
 /***********************************************
 * Kernel state (pointers are device pointers) *
 ***********************************************/
@@ -159,7 +162,11 @@ void Boids::initSimulation(int N) {
   checkCUDAErrorWithLine("kernGenerateRandomPosArray failed!");
 
   // LOOK-2.1 computing grid params
+#ifdef USE_HALF_CELL_WIDTH
+  gridCellWidth = std::max(std::max(rule1Distance, rule2Distance), rule3Distance);
+#else
   gridCellWidth = 2.0f * std::max(std::max(rule1Distance, rule2Distance), rule3Distance);
+#endif
   int halfSideCount = (int)(scene_scale / gridCellWidth) + 1;
   gridSideCount = 2 * halfSideCount;
 
@@ -426,9 +433,12 @@ __global__ void kernUpdateVelNeighborSearchScattered(
   glm::vec3 gridIndex3D = glm::floor(relative_pos);
 
   // - Identify which cells may contain neighbors. This isn't always 8.
+
+#ifndef USE_HALF_CELL_WIDTH
   int x_direction = (glm::round(relative_pos.x - gridIndex3D.x) == 1) ? 1 : -1;
   int y_direction = (glm::round(relative_pos.y - gridIndex3D.y) == 1) ? 1 : -1;
   int z_direction = (glm::round(relative_pos.z - gridIndex3D.z) == 1) ? 1 : -1;
+#endif
 
   glm::vec3 self_position = pos[index];
   glm::vec3 perceived_center(0.0f, 0.0f, 0.0f);
@@ -436,21 +446,39 @@ __global__ void kernUpdateVelNeighborSearchScattered(
   glm::vec3 perceived_velocity(0.0f, 0.0f, 0.0f);
   int rule1_cnt = 0, rule3_cnt = 0;
 
+#ifdef USE_HALF_CELL_WIDTH
+  for (int dx = -1; dx <= 1; dx++) {
+    int x_index = gridIndex3D.x + dx;
+    if (x_index < 0 || x_index > gridResolution) {
+      continue;
+    }
+    for (int dy = -1; dy <= 1; dy++) {
+      int y_index = gridIndex3D.y + dy;
+      if (y_index < 0 || y_index > gridResolution) {
+        continue;
+      }
+      for (int dz = -1; dz <= 1; dz++) {
+        int z_index = gridIndex3D.z + dz;
+        if (z_index < 0 || z_index > gridResolution) {
+          continue;
+        }
+#else
   for (int dx = 0; dx <= 1; dx++) {
-	  int x_index = gridIndex3D.x + dx * x_direction;
-	  if (x_index < 0 || x_index > gridResolution) {
-		  continue;
-	  }
-	  for (int dy = 0; dy <= 1; dy++) {
-		  int y_index = gridIndex3D.y + dy * y_direction;
-		  if (y_index < 0 || y_index > gridResolution) {
-			  continue;
-		  }
-		  for (int dz = 0; dz <= 1; dz++) {
-			  int z_index = gridIndex3D.z + dz * z_direction;
-			  if (z_index < 0 || z_index > gridResolution) {
-				  continue;
-			  }
+    int x_index = gridIndex3D.x + dx * x_direction;
+    if (x_index < 0 || x_index > gridResolution) {
+      continue;
+    }
+    for (int dy = 0; dy <= 1; dy++) {
+      int y_index = gridIndex3D.y + dy * y_direction;
+      if (y_index < 0 || y_index > gridResolution) {
+        continue;
+      }
+      for (int dz = 0; dz <= 1; dz++) {
+        int z_index = gridIndex3D.z + dz * z_direction;
+        if (z_index < 0 || z_index > gridResolution) {
+          continue;
+        }
+#endif
 			  int gridIndex1D = gridIndex3Dto1D(x_index, y_index, z_index, gridResolution);
 			  
 			  // - For each cell, read the start/end indices in the boid pointer array.

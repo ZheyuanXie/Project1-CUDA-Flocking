@@ -216,6 +216,10 @@ void initShaders(GLuint * program) {
     double fps = 0;
     double timebase = 0;
     int frame = 0;
+    
+    #define FPS_BUFFER_SIZE 5
+    int fps_cnt = 0;
+    double fps_buffer[FPS_BUFFER_SIZE];
 
     Boids::unitTest(); // LOOK-1.2 We run some basic example code to make sure
                        // your CUDA development setup is ready to go.
@@ -230,6 +234,15 @@ void initShaders(GLuint * program) {
         fps = frame / (time - timebase);
         timebase = time;
         frame = 0;
+
+        fps_buffer[fps_cnt % FPS_BUFFER_SIZE] = fps;
+        fps_cnt++;
+        double fps_sum = 0.0;
+        for (int i = 0; i < FPS_BUFFER_SIZE; i++) {
+          fps_sum += fps_buffer[i];
+        }
+        double fps_avg = (fps_cnt > FPS_BUFFER_SIZE) ? fps_sum / FPS_BUFFER_SIZE : fps_sum / fps_cnt;
+        std::cout << "CNT:" << fps_cnt << " AVG:" << fps_avg << std::endl;
       }
 
       runCUDA();
